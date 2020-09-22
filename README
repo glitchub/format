@@ -1,0 +1,50 @@
+Format strings in the style of printf, passing them character-by-character to
+the designated FORMAT_CHAR function. This is intended for use in embedded
+systems compiled with GCC.
+
+The following format sequences are supported:
+     %[flags][width]c                             -- argument is char
+     %[flags][width][.precision]s                 -- argument is pointer to char (NULL will be treated as "(null)")
+     %[flags][width][.precision][size]{i|d}       -- argument is signed int, printed as decimal with a sign
+     %[flags][width][.precision][size]{u|b|o|x|X} -- argument is unsigned int, printed as decimal, binary, octal or hex
+
+Flags are zero or more of:
+     "-" : output is left-justified within specified width instead of right-justified
+     "0" : right-justified numbers have with leading "0"s instead of spaces
+     "+" : positive signed integers have a leading "+"
+     " " : positive signed integers have a leading space
+
+Width is minimum total number of characters to be output, padded with space or
+"0" as required. Specify "0" to "255", or "*" to use the low byte of the next
+int argument.
+
+Precision is maximum number of string characters to output (including 0), or
+mininum number of numeric digits to output (with leading "0"s as needed).
+Specify ".0" to ".255", or ".*" to use the low byte of the next int argument.
+
+Size is one of:
+     none : argument is an int
+     "l"  : argument is a long
+     "ll" : argument is a long long
+All other values must be cast to one of these.
+
+If a FORMAT_CHAR macro is defined, then it defines a function to be called for
+each formatted character (passes as an unsigned int), and this prototype is
+used:
+
+    void format(const char *fmt, ...)
+
+This method is somewhat faster and requires less stack.
+
+If a FORMAT_CHAR macro is not defined, then this prototype is used:
+
+    void format((void(*FORMAT_CHAR)(unsigned int), const char *fmt, ...)
+
+This method allows greater flexibility.
+
+The test.c program simply outputs most possible formats, it can be built to use
+format() or printf(). The Makefile builds both flavors and verifies they have
+the same output.
+
+This software is released as-is into the public domain, as described at
+https://unlicense.org. Do whatever you like with it.
