@@ -6,16 +6,19 @@
 // This software is released as-is into the public domain, as described at
 // https://unlicense.org. Do whatever you like with it.
 
-#ifndef va_list
-// Pretend we have stdarg.h
-#define va_list __builtin_va_list
+// This file may be linked or #include'd by another file.
+
+#ifndef va_start
+// mimic stdarg.h
+#define _format_mimic
 #define va_start __builtin_va_start
 #define va_end __builtin_va_end
 #define va_arg __builtin_va_arg
+#define va_list __builtin_va_list
 #endif
 
 #ifdef FORMAT_CHAR
-// If FORMAT_CHAR is defined, it names putchar-style function that will be
+// If FORMAT_CHAR is defined, it invokes putchar-style function to be
 // called directly. This is smallest and fastest.
 void format(char *fmt, ...)
 #else
@@ -31,6 +34,9 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
     {
         if (*fmt != '%')
         {
+#if FORMAT_CRLF
+            if (*fmt == '\n') FORMAT_CHAR('\r'); // expand \n to \r\n
+#endif
             FORMAT_CHAR(*fmt);
             continue;
         }
@@ -257,3 +263,12 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
     }
     va_end(ap);
 }
+
+// Remove transient macros
+#ifdef _format_mimic
+  #undef _format_mimic
+  #undef va_start
+  #undef va_end
+  #undef va_arg
+  #undef va_list
+#endif
