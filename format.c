@@ -126,9 +126,13 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
         if (*fmt == 'c')
         {
             // char
+            int c = va_arg(ap, int) & 0xff;                     // note char arg promotes to int
             if (!opts.left)
                 while (opts.width-- > 1) FORMAT_CHAR(' ');      // pad right before char
-            FORMAT_CHAR(va_arg(ap, int) & 0xff);                // note char arg promotes to int
+#if FORMAT_CRLF
+            if (c == '\n') FORMAT_CHAR('\r');
+#endif
+            FORMAT_CHAR(c);
             if (opts.left)
                 while (opts.width-- > 1) FORMAT_CHAR(' ');      // pad left after char
         } else
@@ -148,7 +152,14 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
                 opts.width = 0;
             if (!opts.left)
                 while (opts.width--) FORMAT_CHAR(' ');          // pad right before string
-            while (chars--) FORMAT_CHAR(*s++);
+            while (chars--)
+            {
+                int c = *s++;
+#if FORMAT_CRLF
+                if (c == '\n') FORMAT_CHAR('\r');
+#endif
+                FORMAT_CHAR(c);
+            }
             if (opts.left)
                 while (opts.width--) FORMAT_CHAR(' ');          // pad left after string
         } else
