@@ -10,7 +10,7 @@
 
 #ifndef va_start
 // mimic stdarg.h
-#define _format_mimic
+#define FORMAT_STDARG
 #define va_start __builtin_va_start
 #define va_end __builtin_va_end
 #define va_arg __builtin_va_arg
@@ -232,15 +232,15 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
             }
 
             // shift divisor to first non zero
-            #define RADIX (opts.binary ? 2 : opts.octal ? 8 : opts.hex ? 16 : 10)
-            #define SIGN (opts.minus ? '-' : opts.plus ? '+' : opts.space ? ' ' : 0)
+            #define FORMAT_RADIX (opts.binary ? 2 : opts.octal ? 8 : opts.hex ? 16 : 10)
+            #define FORMAT_SIGN (opts.minus ? '-' : opts.plus ? '+' : opts.space ? ' ' : 0)
             while (digits > 1 && divisor > number)
             {
-                divisor /= RADIX;
+                divisor /= FORMAT_RADIX;
                 digits--;
             }
 
-            if (opts.width && SIGN) opts.width--;           // adjust width for sign
+            if (opts.width && FORMAT_SIGN) opts.width--;    // adjust width for sign
 
             if (!opts.left && opts.zero && !opts.precise)   // maybe right justify with zeros
                 opts.precision = opts.width;
@@ -256,16 +256,16 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
             if (!opts.left)                                 // right justified
                 while (opts.width--) FORMAT_CHAR(' ');
 
-            if (SIGN) FORMAT_CHAR(SIGN);                    // put sign
+            if (FORMAT_SIGN) FORMAT_CHAR(FORMAT_SIGN);      // put sign
 
             while (opts.precision-- > digits)               // pad with zeros to precision
                 FORMAT_CHAR('0');
 
             while (digits--)                                // output digits in left-to-right order
             {
-                unsigned char n = (number / divisor) % RADIX;
+                unsigned char n = (number / divisor) % FORMAT_RADIX;
                 FORMAT_CHAR((n < 10) ? n+'0' : opts.lower ? n-10+'a' : n-10+'A');
-                divisor /= RADIX;
+                divisor /= FORMAT_RADIX;
             }
 
             if (opts.left)                                  // left justified
@@ -276,8 +276,12 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
 }
 
 // Remove transient macros
-#ifdef _format_mimic
-  #undef _format_mimic
+#undef FORMAT_CHAR
+#undef FORMAT_CRLF
+#undef FORMAT_RADIX
+#undef FORMAT_SIGN
+#ifdef FORMAT_STDARG
+  #undef FORMAT_STDARG
   #undef va_start
   #undef va_end
   #undef va_arg
