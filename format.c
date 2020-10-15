@@ -8,15 +8,23 @@
 
 // This file may be linked or #include'd by another file.
 
+// Special #defines:
+//     FORMAT_STATIC causes format to be defined static (only if #included by another file)
+//     FORMAT_CHAR(c) if format should write character via specific function, see below
+//     FORMAT_CRLF causes all '\n's to be expanded to '\r\n'
+
 #ifndef va_start
 // mimic stdarg.h
-#define FORMAT_STDARG
+#define format_stdarg
 #define va_start __builtin_va_start
 #define va_end __builtin_va_end
 #define va_arg __builtin_va_arg
 #define va_list __builtin_va_list
 #endif
 
+#ifdef FORMAT_STATIC
+static
+#endif
 #ifdef FORMAT_CHAR
 // If FORMAT_CHAR is defined, it invokes putchar-style function to be
 // called directly. This is smallest and fastest.
@@ -47,78 +55,71 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
             continue;
         }
 
-        // wedge format options into 32 bits
-        struct
-        {
-            unsigned char left:1;       // true if flag '-'
-            unsigned char zero:1;       // true if flag '0'
-            unsigned char precise:1;    // true if precision was set
-            unsigned char binary:1;     // true if decoding binary
-            unsigned char octal:1;      // true if decoding octal
-            unsigned char hex:1;        // true if decoding hex (if neither, then decimal)
-            unsigned char lower:1;      // true if lowercase hex
-            unsigned char space:1;      // true if sign is ' '
-            unsigned char plus:1;       // true if sign is '+' (overrides space)
-            unsigned char minus:1;      // true if sign is '-' (overrides plus and space)
-            unsigned char islong:1;     // true if size long
-            unsigned char islonglong:1; // true if size long long
-            unsigned char width;        // width 0-255
-            unsigned char precision;    // precision 0-255
-        } opts = {0};
-
         // flags
+        unsigned char left = 0;         // true if flag '-' (left justify)
+        unsigned char zero = 0;         // true if flag '0' (pad with zeros)
+        unsigned char sign = 0;         // decimal prefix, or 0
         for(;;fmt++)
         {
             switch (*fmt)
             {
                 case '-':               // align left
-                    opts.left = 1;
+                    left = 1;
                     continue;
                 case '0':               // pad with '0' instead of space
-                    opts.zero = 1;
+                    zero = 1;
                     continue;
                 case '+':               // prefix positive signed with '+'
-                    opts.plus = 1;
+                    sign = '+';
                     continue;
                 case ' ':               // prefix positive signed with ' '
-                    opts.space = 1;
-                    opts.plus = 0;
+                    sign = ' ';
+                    continue;
+                case '#':               // ignore other possible flags
+                case '\'':
+                case 'I':
                     continue;
             }
             break;
         }
 
-        // width 0 to 255
+        // width 0-255
+        unsigned char width = 0;
         if (*fmt == '*')
         {
             // use arg
-            opts.width = va_arg(ap, unsigned int);
+            width = va_arg(ap, int);
             fmt++;
         } else
             // inline
-            while (*fmt >= '0' && *fmt <= '9') opts.width = (opts.width * 10) + (*fmt++ - '0');
+            while (*fmt >= '0' && *fmt <= '9') width = (width * 10) + (*fmt++ - '0');
 
-        // precision 0 to 255
+        // precision 0-255, or -1 if not set
+        short precision = -1;
         if (*fmt == '.')
         {
             if (*++fmt == '*')
             {
                 // use arg
-                opts.precision = va_arg(ap, unsigned int);
+                precision = va_arg(ap, int);
                 fmt++;
             } else
+            {
                 // inline
-                while (*fmt >= '0' && *fmt <= '9') opts.precision = (opts.precision * 10) + (*fmt++ - '0');
-            opts.precise = 1; // remember precision is set, for %s"
+                precision = 0;
+                while (*fmt >= '0' && *fmt <= '9') precision = (precision * 10) + (*fmt++ - '0');
+            }
+            precision &= 255;
         }
 
-        // length, 'l' and 'll' only
+        // size 0=int, 1='l', 2='ll'
+        unsigned char size = 0;
         if (*fmt == 'l')
         {
-            opts.islong = 1;
+            size = 1;
             if (*++fmt == 'l')
             {
-                opts.islonglong = 1;
+                size = 2;
                 fmt++;
             }
         }
@@ -126,15 +127,15 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
         if (*fmt == 'c')
         {
             // char
-            int c = va_arg(ap, int) & 0xff;                     // note char arg promotes to int
-            if (!opts.left)
-                while (opts.width-- > 1) FORMAT_CHAR(' ');      // pad right before char
+            char c = va_arg(ap, int) & 0xff;               // note char arg promotes to int
+            if (!left)
+                while (width-- > 1) FORMAT_CHAR(' ');      // pad right before char
 #if FORMAT_CRLF
             if (c == '\n') FORMAT_CHAR('\r');
 #endif
             FORMAT_CHAR(c);
-            if (opts.left)
-                while (opts.width-- > 1) FORMAT_CHAR(' ');      // pad left after char
+            if (left)
+                while (width-- > 1) FORMAT_CHAR(' ');      // pad left after char
         } else
         if (*fmt == 's')
         {
@@ -143,25 +144,23 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
             char *s = va_arg(ap, char *);
             if (!s)
                 s = "(null)";
-            while (s[chars] && chars < 255) chars++;            // 255 chars max
-            if (opts.precise && opts.precision < chars)
-                chars = opts.precision;                         // truncate to precision, possibly 0
-            if (opts.width > chars)
-                opts.width -= chars;
-            else
-                opts.width = 0;
-            if (!opts.left)
-                while (opts.width--) FORMAT_CHAR(' ');          // pad right before string
+            while (s[chars] && chars < 255) chars++;       // 255 chars max
+            if (precision >= 0 && precision < chars)
+                chars = precision;                         // truncate to precision, possibly 0
+            if (width > chars) width -= chars;
+            else width = 0;
+            if (!left)
+                while (width--) FORMAT_CHAR(' ');          // pad right before string
             while (chars--)
             {
-                int c = *s++;
+                char c = *s++;
 #if FORMAT_CRLF
                 if (c == '\n') FORMAT_CHAR('\r');
 #endif
                 FORMAT_CHAR(c);
             }
-            if (opts.left)
-                while (opts.width--) FORMAT_CHAR(' ');          // pad left after string
+            if (left)
+                while (width-- > 0) FORMAT_CHAR(' ');     // pad left after string
         } else
         {
             // must be numeric
@@ -170,6 +169,8 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
             // prepare for decimal       18446744073709551615
             unsigned long long divisor = 10000000000000000000ULL;
             unsigned char digits = 20;
+            unsigned char radix = 10;
+            unsigned char lower = 0;  // true if lowercase
 
             switch (*fmt)
             {
@@ -177,53 +178,59 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
                 case 'd':
                 {
                     // get signed number
-                    if (opts.islonglong) number = (long long)va_arg(ap, long long int);
-                    else if (opts.islong) number = (long long)va_arg(ap, long int);
-                    else number = (long long)va_arg(ap, int);
+                    switch(size)
+                    {
+                        case 0: number = (long long)va_arg(ap, int); break;
+                        case 1: number = (long long)va_arg(ap, long int); break;
+                        case 2: number = (long long)va_arg(ap, long long int); break;
+                    }
 
                     // if negative, set sign char and make it unsigned
                     if ((long long)number < 0)
                     {
-                        opts.minus = 1;
+                        sign = '-';
                         number = -(long long)number;
                     }
                     break;
                 }
 
                 case 'b':
-                    opts.binary = 1;
+                    radix = 2;
                     divisor = 0x8000000000000000ULL;
                     digits = 64;
                     goto getnum;
 
                 case 'o':
-                    opts.octal = 1;
+                    radix = 8;
                     //         1777777777777777777777
                     divisor = 01000000000000000000000ULL;
                     digits = 22;
                     goto getnum;
 
                 case 'x':
-                    opts.lower = 1;
+                    lower = 1;
                     // fall thru
 
                 case 'X':
-                    opts.hex = 1;
+                    radix = 16;
                     //          ffffffffffffffff
                     divisor = 0x1000000000000000ULL;
                     digits = 16;
                     goto getnum;
 
                 case 'u':
+                    lower = 1;
                     // fall thru
 
                 getnum:
                     // get unsigned number
-                    opts.plus = 0; // ignore flags
-                    opts.space = 0;
-                    if (opts.islonglong) number = va_arg(ap, unsigned long long int);
-                    else if (opts.islong) number = va_arg(ap, unsigned long int);
-                    else number = va_arg(ap, unsigned int);
+                    sign = 0; // ignore flags
+                    switch(size)
+                    {
+                        case 0: number = va_arg(ap, unsigned int); break;
+                        case 1: number = va_arg(ap, unsigned long int); break;
+                        case 2: number = va_arg(ap, unsigned long long int); break;
+                    }
                     break;
 
                 default:
@@ -232,44 +239,38 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
             }
 
             // shift divisor to first non zero
-            #define FORMAT_RADIX (opts.binary ? 2 : opts.octal ? 8 : opts.hex ? 16 : 10)
-            #define FORMAT_SIGN (opts.minus ? '-' : opts.plus ? '+' : opts.space ? ' ' : 0)
             while (digits > 1 && divisor > number)
             {
-                divisor /= FORMAT_RADIX;
+                divisor /= radix;
                 digits--;
             }
 
-            if (opts.width && FORMAT_SIGN) opts.width--;    // adjust width for sign
+            if (width && sign) width--;                     // adjust width for sign
 
-            if (!opts.left && opts.zero && !opts.precise)   // maybe right justify with zeros
-                opts.precision = opts.width;
+            if (!left && zero && precision < 0)             // maybe right justify with zeros
+                precision = width;
 
-            if (opts.precision < digits)
-                opts.precision = digits;                    // minimum precision is number of digits
+            if (precision < digits) precision = digits;     // minimum precision is number of digits
 
-            if (opts.width > opts.precision)                // adjust width for precision
-                opts.width -= opts.precision;
+            if (width > precision)                          // adjust width for precision
+                width -= precision;
             else
-                opts.width = 0;
+                width = 0;
 
-            if (!opts.left)                                 // right justified
-                while (opts.width--) FORMAT_CHAR(' ');
+            if (!left) while (width--) FORMAT_CHAR(' ');    // right justified
 
-            if (FORMAT_SIGN) FORMAT_CHAR(FORMAT_SIGN);      // put sign
+            if (sign) FORMAT_CHAR(sign);                    // put sign
 
-            while (opts.precision-- > digits)               // pad with zeros to precision
-                FORMAT_CHAR('0');
+            while (precision-- > digits) FORMAT_CHAR('0');  // pad with zeros to precision
 
             while (digits--)                                // output digits in left-to-right order
             {
-                unsigned char n = (number / divisor) % FORMAT_RADIX;
-                FORMAT_CHAR((n < 10) ? n+'0' : opts.lower ? n-10+'a' : n-10+'A');
-                divisor /= FORMAT_RADIX;
+                unsigned char n = (number / divisor) % radix;
+                FORMAT_CHAR((n < 10) ? n+'0' : n-10+(lower ? 'a' : 'A'));
+                divisor /= radix;
             }
 
-            if (opts.left)                                  // left justified
-                while (opts.width--) FORMAT_CHAR(' ');
+            if (left) while (width--) FORMAT_CHAR(' ');     // left justified
         }
     }
     va_end(ap);
@@ -277,11 +278,11 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
 
 // Remove transient macros
 #undef FORMAT_CHAR
+#undef FORMAT_STATIC
 #undef FORMAT_CRLF
-#undef FORMAT_RADIX
-#undef FORMAT_SIGN
-#ifdef FORMAT_STDARG
-  #undef FORMAT_STDARG
+#undef format_sign
+#ifdef format_stdarg
+  #undef format_stdarg
   #undef va_start
   #undef va_end
   #undef va_arg
