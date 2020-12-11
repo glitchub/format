@@ -4,30 +4,31 @@ SHELL=bash
 .PHONY: default
 default: test.printf test.format
         # sanity check
-	(( $$(stat -c%s test.format) > $$(stat -c%s test.printf) + 2048 ))
 	nm test.printf | grep -q printf
 	! nm test.format | grep -q printf
 	! diff -U0 --label=printf --label=format --suppress-common <(./test.printf) <(./test.format) | grep -v '^@'
 	@echo "TEST PASS!"
 
-COPTS=-O2 -Wall -Werror -Wformat=0 -fstack-usage
+COPTS = -O2 -Wall -Werror
 
-# 'make BROKEN=1' to induce test failure
+# 'make BROKEN=1' induces test failure
 ifdef BROKEN
-COPTS += -DBROKEN
+COPTS += -Wformat=0 -DBROKEN
 endif
 
-# these must build sequentially
-test.printf: test.c test.format
-	cc ${COPTS} -DREFERENCE -o $@ $<
-	mv test.su $@.su
-	cat $@.su
 
-# note format.c is #included by test.c
+# Always rebuild
+.PHONY: test.printf test.format
+
+# build the reference code with real printf
+test.printf: test.c
+	${CC} ${COPTS} -DREFERENCE -o $@ $<
+
+# build the test code linked to format.c
 test.format: test.c format.c
-	cc ${COPTS} -o $@ $<
-	mv test.su $@.su
-	cat $@.su
+	rm -f *.su
+	${CC} ${COPTS} -fstack-usage -o $@ $^
+	cat *.su
 
 .PHONY: clean
-clean:; rm -f test.format test.printf *.su
+clean:; git clean -fx

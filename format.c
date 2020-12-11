@@ -1,64 +1,68 @@
-// Format strings in the style of printf. This is intended for use with gcc in
-// embedded systems.
+// Lightweigt text formatting in the style of vprintf. Does not require heap or
+// large memory buffers. This is intended for use with gcc in embedded systems.
 //
 // See https://github.com/glitchub/format for more information.
 //
 // This software is released as-is into the public domain, as described at
 // https://unlicense.org. Do whatever you like with it.
 
-// This file may be linked or #include'd by another file.
+// This file may be linked or #include'd by another file. In the latter case,
+// keywords such as 'static' appearing immediately before the #include will
+// apply to the format function definition.
 
-// Special #defines:
-//     FORMAT_STATIC causes format to be defined static (only if #included by another file)
-//     FORMAT_CHAR(c) if format should write character via specific function, see below
-//     FORMAT_CRLF causes all '\n's to be expanded to '\r\n'
-
-#ifndef va_start
-// mimic stdarg.h
-#define format_stdarg
-#define va_start __builtin_va_start
-#define va_end __builtin_va_end
-#define va_arg __builtin_va_arg
-#define va_list __builtin_va_list
+#ifndef va_list
+#include <stdarg.h>
 #endif
 
-#ifdef FORMAT_STATIC
-static
-#endif
-#ifdef FORMAT_CHAR
-// If FORMAT_CHAR is defined, it invokes putchar-style function to be
-// called directly. This is smallest and fastest.
-void format(char *fmt, ...)
-#else
-// Otherwise FORMAT_CHAR is passed as a pointer, this increases stack but
-// allows format() to be used for printf and sprintf-style functions.
-void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
-#endif
+// Given a pointer to a putchar-like function, a format string, and a va_list,
+// write the formatted text character-by-character to outchar()
+int format(int(*outchar)(int), char *fmt, va_list ap)
 {
-    va_list ap;
-    va_start(ap, fmt);
+    // Get numeric argument of specified type and return as unsigned long long:
+    // 0 = unsigned int, 1 = unsigned long, 2 = unsigned long long, ~0 = int,
+    // ~1 = long, ~2 = long long.
+    unsigned long long getn(int type)
+    {
+        switch (type)
+        {
+            case 0:  return (unsigned long long) va_arg(ap, unsigned int);
+            case ~0: return (unsigned long long) va_arg(ap, int);
+            case 1:  return (unsigned long long) va_arg(ap, unsigned long);
+            case ~1: return (unsigned long long) va_arg(ap, long);
+        }
+#ifndef FORMAT_MIPS_BUG
+        return va_arg(ap, unsigned long long);
+#elif MIPSEB
+        // Turn this on if long longs (or fields after a long long) don't print
+        // correctly or segfault on MIPSEB. Possibly a bug in va_start, long
+        // longs are aligned on 4 and 12 instead of 0 and 8
+        if (!(((void *)ap - (void *)0) & 7)) ap = (void *)ap + 4;   // force the misalignment
+        unsigned int a = va_arg(ap, unsigned int);                  // read as two ints
+        unsigned int b = va_arg(ap, unsigned int);
+        return ((unsigned long long) a << 32) | b;                  // return long long
+#else
+#error FORMAT_MIPS_BUG not supported on this platform
+#endif
+    }
 
     for (; *fmt; fmt++)
     {
         if (*fmt != '%')
         {
-#if FORMAT_CRLF
-            if (*fmt == '\n') FORMAT_CHAR('\r'); // expand \n to \r\n
-#endif
-            FORMAT_CHAR(*fmt);
+            if (outchar(*fmt) < 0) return -1;
             continue;
         }
 
         if (*++fmt == '%')
         {
-            FORMAT_CHAR('%');
+            if (outchar('%') < 0) return -1;
             continue;
         }
 
         // flags
-        unsigned char left = 0;         // true if flag '-' (left justify)
-        unsigned char zero = 0;         // true if flag '0' (pad with zeros)
-        unsigned char sign = 0;         // decimal prefix, or 0
+        unsigned int left = 0;      // true if flag '-' (left justify)
+        unsigned int zero = 0;      // true if flag '0' (pad with zeros)
+        unsigned int sign = 0;      // decimal prefix, or 0
         for(;;fmt++)
         {
             switch (*fmt)
@@ -75,16 +79,14 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
                 case ' ':               // prefix positive signed with ' '
                     sign = ' ';
                     continue;
-                case '#':               // ignore other possible flags
-                case '\'':
-                case 'I':
+                case '#':               // alternate form, ignored
                     continue;
             }
             break;
         }
 
-        // width 0-255
-        unsigned char width = 0;
+        // width, 0 if not set
+        int width = 0;
         if (*fmt == '*')
         {
             // use arg
@@ -93,9 +95,10 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
         } else
             // inline
             while (*fmt >= '0' && *fmt <= '9') width = (width * 10) + (*fmt++ - '0');
+        if (width < 0) width = 0;
 
-        // precision 0-255, or -1 if not set
-        short precision = -1;
+        // precision, -1 if not set
+        int precision = -1;
         if (*fmt == '.')
         {
             if (*++fmt == '*')
@@ -109,10 +112,9 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
                 precision = 0;
                 while (*fmt >= '0' && *fmt <= '9') precision = (precision * 10) + (*fmt++ - '0');
             }
-            precision &= 255;
         }
 
-        // size 0=int, 1='l', 2='ll'
+        // size 0 = int, 1 = 'l', 2 = 'll'
         unsigned char size = 0;
         if (*fmt == 'l')
         {
@@ -127,40 +129,37 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
         if (*fmt == 'c')
         {
             // char
-            char c = va_arg(ap, int) & 0xff;               // note char arg promotes to int
+            int c = va_arg(ap, int) & 0xff;                 // note char arg promotes to int
             if (!left)
-                while (width-- > 1) FORMAT_CHAR(' ');      // pad right before char
-#if FORMAT_CRLF
-            if (c == '\n') FORMAT_CHAR('\r');
-#endif
-            FORMAT_CHAR(c);
+                while (width-- > 1)
+                    if (outchar(' ') < 0) return -1;        // pad right before char
+            if (outchar(c & 0xff) < 0) return -1;
             if (left)
-                while (width-- > 1) FORMAT_CHAR(' ');      // pad left after char
+                while (width-- > 1)
+                    if (outchar(' ') < 0) return -1;        // pad left after char
         } else
         if (*fmt == 's')
         {
             // string
-            unsigned char chars = 0;
+            int chars = 0;
             char *s = va_arg(ap, char *);
             if (!s)
                 s = "(null)";
-            while (s[chars] && chars < 255) chars++;       // 255 chars max
+            while (s[chars]) chars++;                       // strlen
             if (precision >= 0 && precision < chars)
-                chars = precision;                         // truncate to precision, possibly 0
-            if (width > chars) width -= chars;
-            else width = 0;
+                chars = precision;                          // truncate to precision, possibly 0
+            width -= chars;
             if (!left)
-                while (width--) FORMAT_CHAR(' ');          // pad right before string
+                while (width-- > 0)
+                    if (outchar(' ') < 0) return -1;        // pad right before string
             while (chars--)
             {
                 char c = *s++;
-#if FORMAT_CRLF
-                if (c == '\n') FORMAT_CHAR('\r');
-#endif
-                FORMAT_CHAR(c);
+                if (outchar(c) < 0) return -1;
             }
             if (left)
-                while (width-- > 0) FORMAT_CHAR(' ');     // pad left after string
+                while (width-- > 0)
+                    if (outchar(' ') < 0) return -1;        // pad left after string
         } else
         {
             // must be numeric
@@ -178,12 +177,7 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
                 case 'd':
                 {
                     // get signed number
-                    switch(size)
-                    {
-                        case 0: number = (long long)va_arg(ap, int); break;
-                        case 1: number = (long long)va_arg(ap, long int); break;
-                        case 2: number = (long long)va_arg(ap, long long int); break;
-                    }
+                    number = (long long)getn(~size); // invert to retrieve as signed
 
                     // if negative, set sign char and make it unsigned
                     if ((long long)number < 0)
@@ -198,14 +192,14 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
                     radix = 2;
                     divisor = 0x8000000000000000ULL;
                     digits = 64;
-                    goto getnum;
+                    goto getuns;
 
                 case 'o':
                     radix = 8;
                     //         1777777777777777777777
                     divisor = 01000000000000000000000ULL;
                     digits = 22;
-                    goto getnum;
+                    goto getuns;
 
                 case 'x':
                     lower = 1;
@@ -216,21 +210,16 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
                     //          ffffffffffffffff
                     divisor = 0x1000000000000000ULL;
                     digits = 16;
-                    goto getnum;
+                    goto getuns;
 
                 case 'u':
                     lower = 1;
                     // fall thru
 
-                getnum:
+                getuns:
                     // get unsigned number
                     sign = 0; // ignore flags
-                    switch(size)
-                    {
-                        case 0: number = va_arg(ap, unsigned int); break;
-                        case 1: number = va_arg(ap, unsigned long int); break;
-                        case 2: number = va_arg(ap, unsigned long long int); break;
-                    }
+                    number = getn(size);
                     break;
 
                 default:
@@ -257,34 +246,28 @@ void format(void (*FORMAT_CHAR) (unsigned int), char *fmt, ...)
             else
                 width = 0;
 
-            if (!left) while (width--) FORMAT_CHAR(' ');    // right justified
+            if (!left)
+                while (width-- > 0)
+                    if (outchar(' ') < 0) return -1;        // right justified
 
-            if (sign) FORMAT_CHAR(sign);                    // put sign
+            if (sign)
+                if (outchar(sign) < 0) return -1;           // put sign
 
-            while (precision-- > digits) FORMAT_CHAR('0');  // pad with zeros to precision
+            while (precision-- > digits)
+                if (outchar('0') < 0) return -1;            // pad with zeros to precision
 
             while (digits--)                                // output digits in left-to-right order
             {
                 unsigned char n = (number / divisor) % radix;
-                FORMAT_CHAR((n < 10) ? n+'0' : n-10+(lower ? 'a' : 'A'));
+                n = (n < 10) ? n+'0' : n-10+(lower ? 'a' : 'A');
+                if (outchar(n) < 0) return -1;
                 divisor /= radix;
             }
 
-            if (left) while (width--) FORMAT_CHAR(' ');     // left justified
+            if (left)
+                while (width-- > 0)
+                    if (outchar(' ') < 0) return -1;        // left justified
         }
     }
-    va_end(ap);
+    return 0; // success
 }
-
-// Remove transient macros
-#undef FORMAT_CHAR
-#undef FORMAT_STATIC
-#undef FORMAT_CRLF
-#undef format_sign
-#ifdef format_stdarg
-  #undef format_stdarg
-  #undef va_start
-  #undef va_end
-  #undef va_arg
-  #undef va_list
-#endif
