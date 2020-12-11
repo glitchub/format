@@ -3,14 +3,15 @@
 #include <stdlib.h>
 #include <limits.h>
 
-#define die(...) ({ fprintf(stderr, __VA_ARGS__), exit(1); })
-
 #ifdef REFERENCE
-// Reference build, the output function is printf
+// Reference build, output using printf
 #define output(...) printf(__VA_ARGS__)
 #else
+// Test build, output using format
 #include <stdarg.h>
+
 int format(int (*outchar)(int), char* fmt, va_list ap);
+
 void __attribute__((format (printf, 1, 2))) output(char *fmt, ...)
 {
     va_list ap;
@@ -20,10 +21,10 @@ void __attribute__((format (printf, 1, 2))) output(char *fmt, ...)
 }
 #endif
 
-// given a format string and a value, output a line
+// Given a format string and a value, output a line
 #define test(format, value) output(#value " '%" format "' -> '" format "'\n", value)
 
-// test values
+// Test values
 #define CHR     'x'
 #define STR     "abcdefghijklmnop"
 #define POS     INT_MAX

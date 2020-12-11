@@ -3,11 +3,11 @@ SHELL=bash
 
 .PHONY: default
 default: test.printf test.format
-        # sanity check
-	nm test.printf | grep -q printf
-	! nm test.format | grep -q printf
-	! diff -U0 --label=printf --label=format --suppress-common <(./test.printf) <(./test.format) | grep -v '^@'
-	@echo "TEST PASS!"
+	@ echo "Testing..."
+	@ nm test.printf | grep -q printf
+	@ ! nm test.format | grep -q printf
+	@ ! diff -U0 --label=printf --label=format --suppress-common <(./test.printf) <(./test.format) | grep -v '^@'
+	@ echo "TEST PASS!"
 
 COPTS = -O2 -Wall -Werror
 
