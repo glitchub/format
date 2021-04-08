@@ -1,4 +1,4 @@
-// Lightweigt text formatting in the style of vprintf. Does not require heap or
+// Lightweight text formatting in the style of vprintf. Does not require heap or
 // large memory buffers. This is intended for use with gcc in embedded systems.
 //
 // See https://github.com/glitchub/format for more information.
@@ -133,7 +133,7 @@ int format(int(*outchar)(int), char *fmt, va_list ap)
             if (!left)
                 while (width-- > 1)
                     if (outchar(' ') < 0) return -1;        // pad right before char
-            if (outchar(c & 0xff) < 0) return -1;
+            if (outchar(c & 0xff) < 0) return -1;           // send via outchar
             if (left)
                 while (width-- > 1)
                     if (outchar(' ') < 0) return -1;        // pad left after char
