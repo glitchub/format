@@ -329,4 +329,5 @@ int main(void)
     // the test to fail. Just to make sure it's really working!
     test("%b", UNS);
 #endif
+    return 0;
 }
